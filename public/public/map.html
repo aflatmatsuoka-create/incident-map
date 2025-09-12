@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IncidentMap Web - Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  #map { width: 100%; height: 60vh; }
+  #player { padding:12px; display:none; background:#111; color:#fff }
+  video { width:100%; max-height:40vh; background:#000 }
+</style>
+</head>
+<body style="font-family:-apple-system, system-ui; margin:0;">
+  <div style="padding:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <h3 style="margin:0">🗺 地図</h3>
+    <button id="reload" style="padding:6px 10px">更新</button>
+    <span id="count" style="color:#666"></span>
+    <a href="/" style="margin-left:auto">🎥 撮影ページへ</a>
+  </div>
+  <div id="map"></div>
+
+  <div id="player">
+    <div style="margin-bottom:6px">🎬 再生中: <span id="vidId"></span></div>
+    <video id="video" controls playsinline></video>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    let map, markers = [];
+    const player = document.getElementById('player');
+    const videoEl = document.getElementById('video');
+    const vidId = document.getElementById('vidId');
+
+    function init() {
+      map = L.map('map').setView([35.681, 139.767], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+      map.on('moveend', load);
+      document.getElementById('reload').onclick = load;
+      load();
+    }
+
+    async function load() {
+      const b = map.getBounds();
+      const q = `/map-points?bbox=${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}&hours=24`;
+      const res = await fetch(q);
+      const j = await res.json();
+
+      markers.forEach(m => m.remove()); markers = [];
+      j.points.forEach(p => {
+        const m = L.marker([p.lat, p.lon]).addTo(map);
+        m.on('click', () => play(p.id));
+        markers.push(m);
+      });
+      document.getElementById('count').textContent = `${j.points.length} 件`;
+    }
+
+    function play(id) {
+      vidId.textContent = id;
+      videoEl.src = `/video/${id}`;
+      player.style.display = 'block';
+      videoEl.play().catch(()=>{});
+    }
+
+    init();
+  </script>
+</body>
+</html>
