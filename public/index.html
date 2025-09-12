@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IncidentMap Web - Record (iPhone)</title>
+</head>
+<body style="font-family: -apple-system, system-ui; margin: 16px;">
+  <h2>🎥 撮影してアップロード（iPhone）</h2>
+  <p>「📸 カメラで撮影する」を押して <b>『写真/ビデオを撮る』</b> を選んでください。</p>
+
+  <input id="file" type="file" accept="video/*" capture="environment" style="display:none">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button id="pick" style="padding:10px 16px">📸 カメラで撮影する</button>
+    <span id="status" style="color:#666"></span>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const fileInput = document.getElementById('file');
+    document.getElementById('pick').onclick = () => fileInput.click();
+
+    fileInput.onchange = async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+
+      statusEl.textContent = '位置情報取得中…';
+      const pos = await new Promise(res => navigator.geolocation.getCurrentPosition(p => res(p), _ => res(null)));
+
+      statusEl.textContent = 'アップロード中…';
+      const fd = new FormData();
+      fd.append('lat', pos?.coords.latitude ?? 0);
+      fd.append('lon', pos?.coords.longitude ?? 0);
+      fd.append('captured_at', new Date().toISOString());
+      fd.append('accuracy', Math.round(pos?.coords.accuracy ?? 0));
+      fd.append('video', file, file.name || 'video.mov');
+
+      const r = await fetch('/upload', { method: 'POST', body: fd });
+      const t = await r.text();
+      statusEl.textContent = t.includes('"ok"') ? 'アップロード完了！' : t;
+      if (t.includes('"ok"')) alert('アップロード完了！→ 地図で確認してください');
+    };
+  </script>
+
+  <p style="margin-top:16px;"><a href="/map.html">🗺 地図を見る</a></p>
+</body>
+</html>
