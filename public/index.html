@@ -1,11 +1,9 @@
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>IncidentMap Web - Record (iPhone)</title>
-</head>
-<body style="font-family: -apple-system, system-ui, sans-serif; margin:16px;">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IncidentMap Web - Record (iPhone)</title>
+<body style="font-family:-apple-system,system-ui,sans-serif;margin:16px;">
   <h2>📤 撮影してアップロード（iPhone推奨）</h2>
   <p>「メディアを選ぶ」で <b>写真またはビデオ</b> を選択してください。位置情報は<b>許可</b>してください。</p>
 
@@ -16,13 +14,21 @@
     <span id="status" style="color:#666"></span>
   </div>
 
-  <label>📝 コメント（任意）</label><br>
+  <label>🗂 カテゴリ</label><br>
+  <select id="category" style="padding:6px 8px;margin:6px 0 12px;">
+    <option value="incident">事件/事故</option>
+    <option value="event">イベント/祭り</option>
+    <option value="other" selected>その他</option>
+  </select>
+
+  <div><label>📝 コメント（任意）</label></div>
   <textarea id="note" rows="3" style="width:100%;max-width:560px;"></textarea>
 
   <script>
     const statusEl = document.getElementById('status');
     const fileInput = document.getElementById('file');
     const noteEl = document.getElementById('note');
+    const catEl = document.getElementById('category');
     document.getElementById('pick').onclick = () => fileInput.click();
 
     fileInput.onchange = async () => {
@@ -41,7 +47,7 @@
       fd.append('captured_at', new Date().toISOString());
       fd.append('accuracy', Math.round(pos?.coords.accuracy ?? 0));
       fd.append('note', noteEl.value || '');
-      // フィールド名は何でもOK（サーバ側は any で受領）
+      fd.append('category', catEl.value || 'other');
       fd.append('file', file, file.name || 'media');
 
       const r = await fetch('/upload', { method: 'POST', body: fd });
@@ -59,5 +65,6 @@
   <p style="margin-top:16px;"><a href="/map.html">🗺 地図を見る</a></p>
 </body>
 </html>
+
 
 
