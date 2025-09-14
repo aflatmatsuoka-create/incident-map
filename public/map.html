@@ -4,20 +4,29 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Incident Map</title>
+  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- ★ MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+
   <style>
-    body { margin:0; font-family: -apple-system, system-ui, sans-serif; }
+    body { margin:0; font-family:-apple-system,system-ui,sans-serif; }
     #map { height: 100vh; width: 100%; }
     .leaflet-popup-content { line-height: 1.25; }
     .thumb { max-width: 220px; border-radius: 8px; display:block; }
     .meta { font-size: 12px; color:#555; margin-top:6px; }
     .topbar {
       position: fixed; z-index: 1000; top:10px; left:10px;
-      background: rgba(255,255,255,0.9); backdrop-filter: blur(6px);
+      background: rgba(255,255,255,0.95); backdrop-filter: blur(6px);
       padding:8px 10px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.1);
       display:flex; gap:8px; align-items:center;
     }
     .btn { padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; }
+    .legend { font-size:12px; display:flex; gap:10px; align-items:center; }
+    .dot { width:12px; height:12px; border-radius:50%; display:inline-block; vertical-align:middle; margin-right:4px; border:1px solid #9997; }
   </style>
 </head>
 <body>
@@ -26,73 +35,92 @@
   <div class="topbar">
     <button id="btnMyLoc" class="btn">📍 現在地へ</button>
     <button id="btnAll" class="btn">🔄 全件表示</button>
-    <span style="font-size:12px;color:#666">ピンをタップするとサムネと詳細</span>
+    <div class="legend">
+      <span><span class="dot" style="background:#e24;"></span>事件/事故</span>
+      <span><span class="dot" style="background:#2a7;"></span>イベント</span>
+      <span><span class="dot" style="background:#888;"></span>その他</span>
+    </div>
   </div>
 
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    // 地図の初期デザイン（少しズームを広めに）
-    const map = L.map('map', { zoomControl: true }).setView([35.68, 139.76], 11);
+    // タイル＆地図
+    const map = L.map('map', { zoomControl:true }).setView([35.68, 139.76], 11);
     L.control.scale().addTo(map);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // まず現在地に寄せてからピンを描く（位置許可時）
+    // 現在地へ（任意）
     navigator.geolocation.getCurrentPosition(
       p => map.setView([p.coords.latitude, p.coords.longitude], 13),
-      _ => {}, { enableHighAccuracy: true, timeout: 4000 }
+      _ => {}, { enableHighAccuracy:true, timeout:4000 }
     );
 
-    let markers = [];
+    // ★ カテゴリ別の DivIcon
+    const icons = {
+      incident: L.divIcon({ className:'', html: dot('#e24'), iconAnchor:[8,8] }),
+      event:    L.divIcon({ className:'', html: dot('#2a7'), iconAnchor:[8,8] }),
+      other:    L.divIcon({ className:'', html: dot('#888'), iconAnchor:[8,8] })
+    };
+    function dot(color){
+      return `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 1px #0003"></div>`;
+    }
+
+    // ★ クラスタグループ
+    const cluster = L.markerClusterGroup({
+      // 適度に集約する設定
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+    });
+    map.addLayer(cluster);
+
     let lastBounds = null;
 
-    async function loadAll() {
+    // 読み込み
+    loadAll();
+    async function loadAll(){
       const res = await fetch('/map-points');
       const data = await res.json();
       const pts = Array.isArray(data) ? data : (data.points || []);
       drawPins(pts);
     }
 
-    function drawPins(pts) {
-      // 既存をクリア
-      markers.forEach(m => m.remove());
-      markers = [];
-
+    function drawPins(pts){
+      cluster.clearLayers();
       const bounds = [];
+
       pts.forEach(p => {
         if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
 
-        const m = L.marker([p.lat, p.lon]).addTo(map);
+        const icon = icons[p.category] || icons.other;
+        const m = L.marker([p.lat, p.lon], { icon });
+
         const when = new Date(p.captured_at || p.created_at || Date.now()).toLocaleString();
-
-        let mediaHtml = '';
-        if (p.kind === 'image') {
-          mediaHtml = `<img class="thumb" src="/media/${p.id}" alt="thumb">`;
-        } else {
-          // 動画は小さめサムネ再生（サムネ代わり）
-          mediaHtml = `<video class="thumb" src="/media/${p.id}" playsinline muted controls preload="metadata"></video>`;
-        }
-
-        const note = p.note ? `<div class="meta">📝 ${escapeHtml(p.note)}</div>` : '';
+        let mediaHtml = (p.kind === 'image')
+          ? `<img class="thumb" src="/media/${p.id}" alt="thumb">`
+          : `<video class="thumb" src="/media/${p.id}" playsinline muted controls preload="metadata"></video>`;
         const acc = (typeof p.accuracy === 'number' && p.accuracy > 0) ? `（精度 ±${Math.round(p.accuracy)}m）` : '';
+        const note = p.note ? `<div class="meta">📝 ${escapeHtml(p.note)}</div>` : '';
+        const catLabel = p.category === 'incident' ? '事件/事故' : (p.category === 'event' ? 'イベント/祭り' : 'その他');
 
         m.bindPopup(`
           <div>
             ${mediaHtml}
+            <div class="meta">🗂 ${catLabel}</div>
             <div class="meta">📅 ${when} ${acc}</div>
             ${note}
           </div>
         `);
 
-        markers.push(m);
+        cluster.addLayer(m);
         bounds.push([p.lat, p.lon]);
       });
 
-      if (bounds.length) {
+      if (bounds.length){
         const b = L.latLngBounds(bounds);
         lastBounds = b;
-        map.fitBounds(b, { padding: [28,28] });
+        map.fitBounds(b, { padding:[28,28] });
       }
     }
 
@@ -104,15 +132,14 @@
       );
     };
     document.getElementById('btnAll').onclick = () => {
-      if (lastBounds) map.fitBounds(lastBounds, { padding: [28,28] }); else loadAll();
+      if (lastBounds) map.fitBounds(lastBounds, { padding:[28,28] }); else loadAll();
     };
 
-    // エスケープ（XSS防止）
+    // XSS対策
     function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));}
-
-    loadAll();
   </script>
 </body>
 </html>
+
 
 
