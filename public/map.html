@@ -7,7 +7,7 @@
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <!-- ★ MarkerCluster -->
+  <!-- MarkerCluster -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
@@ -19,74 +19,123 @@
     .thumb { max-width: 220px; border-radius: 8px; display:block; }
     .meta { font-size: 12px; color:#555; margin-top:6px; }
     .topbar {
-      position: fixed; z-index: 1000; top:10px; left:10px;
-      background: rgba(255,255,255,0.95); backdrop-filter: blur(6px);
+      position: fixed; z-index: 1000; top:10px; left:10px; right:10px;
+      background: rgba(255,255,255,0.96); backdrop-filter: blur(6px);
       padding:8px 10px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.1);
-      display:flex; gap:8px; align-items:center;
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
     }
     .btn { padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; }
-    .legend { font-size:12px; display:flex; gap:10px; align-items:center; }
+    .btn.active { background:#eef; border-color:#88f; }
+    .legend { font-size:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     .dot { width:12px; height:12px; border-radius:50%; display:inline-block; vertical-align:middle; margin-right:4px; border:1px solid #9997; }
+    /* クラスタ色（件数によって） */
+    .marker-cluster-small { background: rgba(40,167,69,.6); }
+    .marker-cluster-small div { background: rgba(40,167,69,.9); }
+    .marker-cluster-medium { background: rgba(255,140,0,.6); }
+    .marker-cluster-medium div { background: rgba(255,140,0,.9); }
+    .marker-cluster-large { background: rgba(220,53,69,.6); }
+    .marker-cluster-large div { background: rgba(220,53,69,.9); }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
   <div class="topbar">
-    <button id="btnMyLoc" class="btn">📍 現在地へ</button>
-    <button id="btnAll" class="btn">🔄 全件表示</button>
-    <div class="legend">
-      <span><span class="dot" style="background:#e24;"></span>事件/事故</span>
-      <span><span class="dot" style="background:#2a7;"></span>イベント</span>
-      <span><span class="dot" style="background:#888;"></span>その他</span>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <button data-hours="24" class="btn" id="f24">24h</button>
+      <button data-hours="168" class="btn" id="f7">7d</button>
+      <button data-hours="720" class="btn" id="f30">30d</button>
+      <button data-hours="" class="btn active" id="fall">All</button>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div style="margin-left:auto;display:flex;gap:8px;">
+      <button id="btnMyLoc" class="btn">📍 現在地へ</button>
+      <button id="btnAll" class="btn">🔄 全件表示</button>
     </div>
   </div>
 
   <script>
-    // タイル＆地図
+    // 地図
     const map = L.map('map', { zoomControl:true }).setView([35.68, 139.76], 11);
     L.control.scale().addTo(map);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // 現在地へ（任意）
     navigator.geolocation.getCurrentPosition(
       p => map.setView([p.coords.latitude, p.coords.longitude], 13),
       _ => {}, { enableHighAccuracy:true, timeout:4000 }
     );
 
-    // ★ カテゴリ別の DivIcon
-    const icons = {
-      incident: L.divIcon({ className:'', html: dot('#e24'), iconAnchor:[8,8] }),
-      event:    L.divIcon({ className:'', html: dot('#2a7'), iconAnchor:[8,8] }),
-      other:    L.divIcon({ className:'', html: dot('#888'), iconAnchor:[8,8] })
+    // カテゴリ → 色
+    const catColor = {
+      incident: '#e24',   // 赤
+      event: '#2a7',      // 緑
+      traffic: '#f80',    // オレンジ
+      fire: '#a03',       // 焦げ赤
+      disaster: '#06c',   // 青
+      police: '#6a3',     // 黄緑
+      other: '#888'       // グレー
     };
-    function dot(color){
-      return `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 1px #0003"></div>`;
-    }
+    const catLabel = {
+      incident: '事件/事故',
+      event: 'イベント/祭り',
+      traffic: '交通',
+      fire: '火災',
+      disaster: '災害',
+      police: '警察/防犯',
+      other: 'その他'
+    };
 
-    // ★ クラスタグループ
+    // 凡例を作成
+    const legendEl = document.getElementById('legend');
+    legendEl.innerHTML = Object.keys(catColor).map(k =>
+      `<span><span class="dot" style="background:${catColor[k]}"></span>${catLabel[k]}</span>`
+    ).join(' ');
+
+    // カテゴリごとの小さい丸アイコン
+    function dot(color){
+      return `<div style="width:16px;height:16px;border-radius:50%;background:${color};
+              border:2px solid #fff;box-shadow:0 0 0 1px #0003"></div>`;
+    }
+    const icons = Object.fromEntries(Object.entries(catColor).map(
+      ([k,color]) => [k, L.divIcon({ className:'', html: dot(color), iconAnchor:[8,8] })]
+    ));
+
+    // クラスタ（件数に応じて色変化）
     const cluster = L.markerClusterGroup({
-      // 適度に集約する設定
       maxClusterRadius: 50,
       spiderfyOnMaxZoom: true,
       showCoverageOnHover: false,
+      iconCreateFunction(cluster) {
+        const count = cluster.getChildCount();
+        let c = ' marker-cluster-';
+        if (count < 10) c += 'small';
+        else if (count < 50) c += 'medium';
+        else c += 'large';
+        return new L.DivIcon({
+          html: `<div><span>${count}</span></div>`,
+          className: 'marker-cluster' + c,
+          iconSize: new L.Point(40, 40)
+        });
+      }
     });
     map.addLayer(cluster);
 
     let lastBounds = null;
+    let currentHours = ''; // "", "24", "168", "720"
 
     // 読み込み
     loadAll();
-    async function loadAll(){
-      const res = await fetch('/map-points');
+    async function loadAll() {
+      const q = currentHours ? `?hours=${encodeURIComponent(currentHours)}` : '';
+      const res = await fetch('/map-points' + q);
       const data = await res.json();
       const pts = Array.isArray(data) ? data : (data.points || []);
       drawPins(pts);
     }
 
-    function drawPins(pts){
+    function drawPins(pts) {
       cluster.clearLayers();
       const bounds = [];
 
@@ -97,17 +146,17 @@
         const m = L.marker([p.lat, p.lon], { icon });
 
         const when = new Date(p.captured_at || p.created_at || Date.now()).toLocaleString();
-        let mediaHtml = (p.kind === 'image')
+        const mediaHtml = (p.kind === 'image')
           ? `<img class="thumb" src="/media/${p.id}" alt="thumb">`
           : `<video class="thumb" src="/media/${p.id}" playsinline muted controls preload="metadata"></video>`;
         const acc = (typeof p.accuracy === 'number' && p.accuracy > 0) ? `（精度 ±${Math.round(p.accuracy)}m）` : '';
         const note = p.note ? `<div class="meta">📝 ${escapeHtml(p.note)}</div>` : '';
-        const catLabel = p.category === 'incident' ? '事件/事故' : (p.category === 'event' ? 'イベント/祭り' : 'その他');
+        const label = catLabel[p.category] || catLabel.other;
 
         m.bindPopup(`
           <div>
             ${mediaHtml}
-            <div class="meta">🗂 ${catLabel}</div>
+            <div class="meta">🗂 ${label}</div>
             <div class="meta">📅 ${when} ${acc}</div>
             ${note}
           </div>
@@ -123,6 +172,17 @@
         map.fitBounds(b, { padding:[28,28] });
       }
     }
+
+    // 期間フィルタボタン
+    const filterBtns = Array.from(document.querySelectorAll('[data-hours]'));
+    filterBtns.forEach(btn => {
+      btn.onclick = () => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentHours = btn.getAttribute('data-hours') || '';
+        loadAll();
+      };
+    });
 
     // UI
     document.getElementById('btnMyLoc').onclick = () => {
@@ -140,6 +200,7 @@
   </script>
 </body>
 </html>
+
 
 
 
