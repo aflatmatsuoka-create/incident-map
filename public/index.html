@@ -3,57 +3,77 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>IncidentMap Web - Record (確認してからアップロード)</title>
+  <title>IncidentMap Web - Record (確認→アップロード)</title>
   <style>
+    :root { color-scheme: light dark; }
     body { font-family:-apple-system,system-ui,sans-serif; margin:16px; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
-    .btn { padding:10px 14px; border:1px solid #ddd; background:#fff; border-radius:8px; }
+    .btn { padding:10px 14px; border:1px solid #ddd; background:#fff; border-radius:8px; cursor:pointer; }
+    .btn[disabled] { opacity:.5; cursor:not-allowed; }
     .btn.primary { background:#0b5; color:#fff; border-color:#0b5; }
-    .btn.danger { background:#e24; color:#fff; border-color:#e24; }
     #previewBox { display:none; margin-top:12px; }
     #previewBox .meta { font-size:12px; color:#555; margin-top:6px; }
     #previewMedia { max-width:100%; width:360px; border-radius:10px; background:#000; }
     textarea { width:100%; max-width:560px; }
     select { padding:6px 8px; }
     #status { color:#666; }
+
+    /* ── アップロード画面（別画面風） ── */
+    #uploadingScreen {
+      position: fixed; inset: 0; background: rgba(255,255,255,.98);
+      display: none; align-items: center; justify-content: center; flex-direction: column;
+      gap: 14px; text-align: center; padding: 24px;
+      backdrop-filter: blur(6px);
+    }
+    @media (prefers-color-scheme: dark){
+      #uploadingScreen { background: rgba(0,0,0,.85); color:#fff; }
+    }
+    .spinner {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 4px solid #ddd; border-top-color: #0b5; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .sub { color:#666; font-size: 13px; }
   </style>
 </head>
 <body>
   <h2>📤 撮影 → 確認 → カテゴリ選択 → アップロード</h2>
-  <p>先に <b>カテゴリ</b> を選び、次に <b>撮影</b> してください。撮影後に内容を確認してからアップロードできます。</p>
 
-  <!-- 1) 先にカテゴリ & コメントを決める -->
-  <div class="row">
-    <label for="category">🗂 カテゴリ</label>
-    <select id="category">
-      <option value="incident">事件/事故</option>
-      <option value="event">イベント/祭り</option>
-      <option value="traffic">交通</option>
-      <option value="fire">火災</option>
-      <option value="disaster">災害</option>
-      <option value="police">警察/防犯</option>
-      <option value="other" selected>その他</option>
-    </select>
-  </div>
-  <div class="row" style="flex-direction:column;align-items:flex-start;">
-    <label for="note">📝 コメント（任意）</label>
-    <textarea id="note" rows="3" placeholder="例）〇〇通りで接触事故、軽傷。渋滞発生中など"></textarea>
+  <!-- 入力フォーム（プレビュー前） -->
+  <div id="formArea">
+    <p>先に <b>カテゴリ</b> を選び、次に <b>撮影</b> してください。撮影後に確認してからアップロードできます。</p>
+
+    <div class="row">
+      <label for="category">🗂 カテゴリ</label>
+      <select id="category">
+        <option value="incident">事件/事故</option>
+        <option value="event">イベント/祭り</option>
+        <option value="traffic">交通</option>
+        <option value="fire">火災</option>
+        <option value="disaster">災害</option>
+        <option value="police">警察/防犯</option>
+        <option value="other" selected>その他</option>
+      </select>
+    </div>
+
+    <div class="row" style="flex-direction:column;align-items:flex-start;">
+      <label for="note">📝 コメント（任意）</label>
+      <textarea id="note" rows="3" placeholder="例）〇〇通りで接触事故、軽傷。渋滞発生中など"></textarea>
+    </div>
+
+    <input id="file" type="file" accept="image/*,video/*" capture="environment" style="display:none" />
+    <div class="row">
+      <button id="btnShoot" class="btn">📸 撮影する（写真/動画）</button>
+      <span id="status"></span>
+    </div>
   </div>
 
-  <!-- 2) 撮影ボタン（この段階ではアップロードしない） -->
-  <input id="file" type="file" accept="image/*,video/*" capture="environment" style="display:none" />
-  <div class="row">
-    <button id="btnShoot" class="btn">📸 撮影する（写真/動画）</button>
-    <span id="status"></span>
-  </div>
-
-  <!-- 3) 撮影後のプレビュー＆確認ステップ -->
+  <!-- プレビュー＆確認ステップ -->
   <div id="previewBox">
     <div class="row" style="margin-top:6px;">
       <b>プレビュー</b><span id="fileInfo" class="meta"></span>
     </div>
     <div>
-      <!-- 画像 or 動画をここに差し替え表示 -->
       <img id="previewImg" alt="" style="display:none" />
       <video id="previewVideo" playsinline controls style="display:none"></video>
     </div>
@@ -67,7 +87,16 @@
 
   <p style="margin-top:16px;"><a href="/map.html">🗺 地図を見る</a></p>
 
+  <!-- アップロード中 画面 -->
+  <div id="uploadingScreen" aria-live="polite">
+    <div class="spinner" role="progressbar" aria-label="アップロード中"></div>
+    <div style="font-weight:600">アップロード中…</div>
+    <div class="sub">この画面のままお待ちください。完了すると自動で地図に移動します。</div>
+    <button id="btnCancel" class="btn" style="display:none">キャンセル</button>
+  </div>
+
   <script>
+    // 要素
     const statusEl = document.getElementById('status');
     const fileInput = document.getElementById('file');
     const btnShoot = document.getElementById('btnShoot');
@@ -79,28 +108,28 @@
     const fileInfo = document.getElementById('fileInfo');
     const noteEl = document.getElementById('note');
     const catEl = document.getElementById('category');
+    const formArea = document.getElementById('formArea');
+    const uploadingScreen = document.getElementById('uploadingScreen');
 
     let selectedFile = null;
     let objectUrl = null;
+    let isUploading = false;
+    let aborter = null;
 
-    btnShoot.onclick = () => {
-      // ここではアップロードしない：撮影だけ
-      fileInput.click();
-    };
+    // 撮影
+    btnShoot.onclick = () => fileInput.click();
 
     fileInput.onchange = () => {
       const f = fileInput.files && fileInput.files[0];
       if (!f) return;
       selectedFile = f;
 
-      // プレビューを出す（動画/画像で切替）
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = URL.createObjectURL(f);
-
       const isImage = f.type.startsWith('image/');
+
       previewImg.style.display = isImage ? 'block' : 'none';
       previewVideo.style.display = isImage ? 'none' : 'block';
-
       if (isImage) {
         previewImg.id = 'previewMedia';
         previewImg.src = objectUrl;
@@ -115,11 +144,11 @@
       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
     };
 
+    // 撮り直し
     btnRetake.onclick = () => {
-      // 撮り直し：状態をクリアして再度撮影へ
-      selectedFile = null;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = null;
+      selectedFile = null;
       previewImg.removeAttribute('src');
       previewVideo.removeAttribute('src');
       previewBox.style.display = 'none';
@@ -128,18 +157,24 @@
       fileInput.click();
     };
 
+    // アップロード実行（別画面風に切り替え）
     btnUpload.onclick = async () => {
-      if (!selectedFile) {
-        alert('ファイルが選ばれていません');
-        return;
-      }
-      statusEl.textContent = '位置情報取得中…（許可してください）';
+      if (!selectedFile || isUploading) return;
+      isUploading = true;
+      btnUpload.disabled = true;
+      btnRetake.disabled = true;
 
+      // URL を /uploading に変更（“画面遷移”の見た目）
+      history.pushState({ uploading: true }, '', '/uploading');
+      showUploading(true);
+
+      // 位置情報
+      statusEl.textContent = '位置情報取得中…';
       const pos = await new Promise(res =>
         navigator.geolocation.getCurrentPosition(p => res(p), _ => res(null), { enableHighAccuracy:true, timeout:8000 })
       );
 
-      statusEl.textContent = 'アップロード中…';
+      // 送信
       const fd = new FormData();
       fd.append('lat', pos?.coords?.latitude ?? 0);
       fd.append('lon', pos?.coords?.longitude ?? 0);
@@ -150,24 +185,58 @@
       fd.append('file', selectedFile, selectedFile.name || 'media');
 
       try {
-        const r = await fetch('/upload', { method: 'POST', body: fd });
+        aborter = new AbortController();
+        const r = await fetch('/upload', { method: 'POST', body: fd, signal: aborter.signal });
         const t = await r.json().catch(()=>({}));
         if (t.ok) {
-          statusEl.textContent = 'アップロード完了！';
-          alert('アップロード完了！地図で確認できます。');
-          location.href = '/map.html';
+          // 完了 → マップへ
+          location.replace('/map.html');
         } else {
           throw new Error(t.error || 'アップロード失敗');
         }
       } catch (e) {
         console.error(e);
-        statusEl.textContent = '失敗しました';
         alert('アップロードに失敗しました: ' + e.message);
+        // 失敗したら元のURLに戻す
+        history.replaceState({}, '', '/');
+        showUploading(false);
+        isUploading = false;
+        btnUpload.disabled = false;
+        btnRetake.disabled = false;
+      } finally {
+        aborter = null;
       }
+    };
+
+    // “アップロード画面”の表示切替
+    function showUploading(on){
+      uploadingScreen.style.display = on ? 'flex' : 'none';
+      formArea.style.pointerEvents = on ? 'none' : 'auto';
+      previewBox.style.pointerEvents = on ? 'none' : 'auto';
+    }
+
+    // もし /uploading でリロードされた場合の扱い
+    if (location.pathname === '/uploading') {
+      // 実際のアップロード中でなければトップへ戻す
+      if (!isUploading) {
+        history.replaceState({}, '', '/');
+      }
+      showUploading(isUploading);
+    }
+
+    // （任意）キャンセルしたい場合の処理
+    document.getElementById('btnCancel').onclick = () => {
+      if (aborter) aborter.abort();
+      history.replaceState({}, '', '/');
+      showUploading(false);
+      isUploading = false;
+      btnUpload.disabled = false;
+      btnRetake.disabled = false;
     };
   </script>
 </body>
 </html>
+
 
 
 
