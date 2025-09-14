@@ -18,6 +18,10 @@
   <select id="category" style="padding:6px 8px;margin:6px 0 12px;">
     <option value="incident">事件/事故</option>
     <option value="event">イベント/祭り</option>
+    <option value="traffic">交通</option>
+    <option value="fire">火災</option>
+    <option value="disaster">災害</option>
+    <option value="police">警察/防犯</option>
     <option value="other" selected>その他</option>
   </select>
 
@@ -53,18 +57,14 @@
       const r = await fetch('/upload', { method: 'POST', body: fd });
       const t = await r.json().catch(() => ({}));
       statusEl.textContent = t.ok ? 'アップロード完了！' : ('失敗: ' + (t.error || '不明'));
-      if (t.ok) {
-        alert('アップロード完了！地図に反映されます。');
-        location.href = '/map.html';
-      } else {
-        alert('アップロード失敗: ' + (t.error || '不明'));
-      }
+      if (t.ok) location.href = '/map.html';
     };
   </script>
 
   <p style="margin-top:16px;"><a href="/map.html">🗺 地図を見る</a></p>
 </body>
 </html>
+
 
 
 
