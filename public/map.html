@@ -8,61 +8,111 @@
   <style>
     body { margin:0; font-family: -apple-system, system-ui, sans-serif; }
     #map { height: 100vh; width: 100%; }
-    .leaflet-popup-content { line-height: 1.2; }
-    video { max-width: 260px; height: auto; }
+    .leaflet-popup-content { line-height: 1.25; }
+    .thumb { max-width: 220px; border-radius: 8px; display:block; }
+    .meta { font-size: 12px; color:#555; margin-top:6px; }
+    .topbar {
+      position: fixed; z-index: 1000; top:10px; left:10px;
+      background: rgba(255,255,255,0.9); backdrop-filter: blur(6px);
+      padding:8px 10px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.1);
+      display:flex; gap:8px; align-items:center;
+    }
+    .btn { padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
+  <div class="topbar">
+    <button id="btnMyLoc" class="btn">📍 現在地へ</button>
+    <button id="btnAll" class="btn">🔄 全件表示</button>
+    <span style="font-size:12px;color:#666">ピンをタップするとサムネと詳細</span>
+  </div>
+
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
-    const map = L.map('map').setView([35.68, 139.76], 12); // 初期は東京
+    // 地図の初期デザイン（少しズームを広めに）
+    const map = L.map('map', { zoomControl: true }).setView([35.68, 139.76], 11);
+    L.control.scale().addTo(map);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '© OpenStreetMap'
     }).addTo(map);
 
+    // まず現在地に寄せてからピンを描く（位置許可時）
+    navigator.geolocation.getCurrentPosition(
+      p => map.setView([p.coords.latitude, p.coords.longitude], 13),
+      _ => {}, { enableHighAccuracy: true, timeout: 4000 }
+    );
+
     let markers = [];
+    let lastBounds = null;
 
-    async function load() {
-      try {
-        const res = await fetch('/map-points'); // bbox なしでもOK
-        const data = await res.json();
-        const pts = Array.isArray(data) ? data : (data.points || []);
+    async function loadAll() {
+      const res = await fetch('/map-points');
+      const data = await res.json();
+      const pts = Array.isArray(data) ? data : (data.points || []);
+      drawPins(pts);
+    }
 
-        // 古いマーカーを消す
-        markers.forEach(m => m.remove());
-        markers = [];
+    function drawPins(pts) {
+      // 既存をクリア
+      markers.forEach(m => m.remove());
+      markers = [];
 
-        const bounds = [];
-        pts.forEach(p => {
-          if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
+      const bounds = [];
+      pts.forEach(p => {
+        if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
 
-          const m = L.marker([p.lat, p.lon]).addTo(map);
-          const when = new Date(p.captured_at || p.created_at || Date.now())
-                         .toLocaleString();
-          const videoHtml = p.id
-            ? `<video src="/video/${p.id}" controls playsinline></video>`
-            : '';
+        const m = L.marker([p.lat, p.lon]).addTo(map);
+        const when = new Date(p.captured_at || p.created_at || Date.now()).toLocaleString();
 
-          m.bindPopup(`<b>${when}</b><br>${videoHtml}`);
-          markers.push(m);
-          bounds.push([p.lat, p.lon]);
-        });
-
-        if (bounds.length) {
-          map.fitBounds(bounds, { padding: [24,24] });
+        let mediaHtml = '';
+        if (p.kind === 'image') {
+          mediaHtml = `<img class="thumb" src="/media/${p.id}" alt="thumb">`;
         } else {
-          console.log('No points yet. Upload one from /');
+          // 動画は小さめサムネ再生（サムネ代わり）
+          mediaHtml = `<video class="thumb" src="/media/${p.id}" playsinline muted controls preload="metadata"></video>`;
         }
-      } catch (e) {
-        console.error('map load error', e);
-        alert('地点の取得に失敗しました');
+
+        const note = p.note ? `<div class="meta">📝 ${escapeHtml(p.note)}</div>` : '';
+        const acc = (typeof p.accuracy === 'number' && p.accuracy > 0) ? `（精度 ±${Math.round(p.accuracy)}m）` : '';
+
+        m.bindPopup(`
+          <div>
+            ${mediaHtml}
+            <div class="meta">📅 ${when} ${acc}</div>
+            ${note}
+          </div>
+        `);
+
+        markers.push(m);
+        bounds.push([p.lat, p.lon]);
+      });
+
+      if (bounds.length) {
+        const b = L.latLngBounds(bounds);
+        lastBounds = b;
+        map.fitBounds(b, { padding: [28,28] });
       }
     }
 
-    load();
+    // UI
+    document.getElementById('btnMyLoc').onclick = () => {
+      navigator.geolocation.getCurrentPosition(
+        p => map.setView([p.coords.latitude, p.coords.longitude], 15),
+        () => alert('現在地が取得できませんでした')
+      );
+    };
+    document.getElementById('btnAll').onclick = () => {
+      if (lastBounds) map.fitBounds(lastBounds, { padding: [28,28] }); else loadAll();
+    };
+
+    // エスケープ（XSS防止）
+    function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));}
+
+    loadAll();
   </script>
 </body>
 </html>
+
 
