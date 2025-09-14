@@ -94,24 +94,37 @@ app.get('/video/:id', (req, res) => {
   }
 });
 
+// マップ用ポイント一覧（bbox が無ければ全件返す）
 app.get('/map-points', (req, res) => {
   try {
-    const bbox = (req.query.bbox || '').toString().split(',').map(Number);
-    const hours = parseInt((req.query.hours || '24').toString(), 10);
-    if (bbox.length !== 4 || bbox.some(n => !Number.isFinite(n))) return res.status(400).json({ error: 'bbox must be left,bottom,right,top' });
+    const { bbox, hours } = req.query;
+    let results = points || [];
 
-    const [left, bottom, right, top] = bbox;
-    const since = Date.now() - hours*3600*1000;
-    const arr = readDB();
-    const rows = arr
-      .filter(r => Date.parse(r.captured_at) >= since && r.lat >= bottom && r.lat <= top && r.lon >= left && r.lon <= right)
-      .sort((a,b)=> Date.parse(b.captured_at)-Date.parse(a.captured_at))
-      .slice(0,5000);
-    res.json({ points: rows.map(({id,lat,lon,captured_at}) => ({ id, lat, lon, captured_at })) });
+    // bbox=west,south,east,north が来たときだけ範囲で絞る
+    if (bbox) {
+      const [west, south, east, north] = bbox.split(',').map(Number);
+      if ([west, south, east, north].some(v => Number.isNaN(v))) {
+        return res.status(400).json({ error: 'bbox は左,下,右,上の順に数値で指定してください' });
+      }
+      results = results.filter(p =>
+        p.lon >= west && p.lon <= east &&
+        p.lat >= south && p.lat <= north
+      );
+    }
+
+    // ?hours=48 のように時間で絞る（任意）
+    if (hours) {
+      const cutoff = Date.now() - parseInt(hours, 10) * 3600 * 1000;
+      results = results.filter(p => (p.created_at || p.captured_at || 0) > cutoff);
+    }
+
+    res.json({ points: results });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'failed' });
+    res.status(500).json({ error: 'map-points 取得でエラー' });
   }
 });
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/map.html', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'map.html')));
 
 app.listen(PORT, () => console.log('Server running on port ' + PORT));
