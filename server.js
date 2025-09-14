@@ -1,4 +1,4 @@
-// server.js  — ESM（"type":"module"）想定
+// server.js — ESM ("type":"module")
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -13,84 +13,59 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// 静的ファイル（/public）を配信
+// 静的配信
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 
-// 保存先（Render でも書き込み可）
+// 保存先
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const DB_FILE = path.join(process.cwd(), 'points.json');
-function readDB() {
-  try {
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-  } catch {
-    return [];
-  }
-}
-function writeDB(arr) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(arr), 'utf-8');
-}
+const readDB = () => { try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8')); } catch { return []; } };
+const writeDB = (arr) => fs.writeFileSync(DB_FILE, JSON.stringify(arr), 'utf-8');
 
-// アップロード設定（ファイル名は一時でOK。保存時にリネーム）
+// アップロード設定
 const storage = multer.diskStorage({
-  destination(_req, _file, cb) {
-    cb(null, UPLOAD_DIR);
-  },
-  filename(_req, file, cb) {
-    // 一旦オリジナル名のまま
-    cb(null, Date.now() + '_' + (file.originalname || 'video.mov'));
-  }
+  destination(_req, _file, cb) { cb(null, UPLOAD_DIR); },
+  filename(_req, file, cb) { cb(null, Date.now() + '_' + (file.originalname || 'media')); }
 });
 const upload = multer({ storage });
+// どんなフィールド名でも1ファイル受け取れるように
+const uploadAny = upload.any();
+
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 
-// ルート（録画・アップロード画面）
-app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// ルートと地図
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/map.html', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'map.html')));
 
-// 地図ページ
-app.get('/map.html', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'map.html'));
-});
-
-// 動画取得（/video/:id で配信）
-app.get('/video/:id', (req, res) => {
-  const id = req.params.id;
+// メディア配信（画像/動画どちらでも）
+app.get('/media/:id', (req, res) => {
   const arr = readDB();
-  const p = arr.find(v => v.id === id);
-  if (!p || !p.file_path || !fs.existsSync(p.file_path)) {
-    return res.status(404).send('Not found');
-  }
-  res.sendFile(p.file_path);
+  const item = arr.find(v => v.id === req.params.id);
+  if (!item || !item.file_path || !fs.existsSync(item.file_path)) return res.status(404).send('Not found');
+  res.sendFile(item.file_path);
 });
 
-// ピン一覧（bbox 省略OK、hours 省略OK）
+// ピン一覧（bbox/時間フィルタ対応）
 app.get('/map-points', (req, res) => {
   try {
-    const arr = readDB();
+    let result = readDB();
 
-    // bbox = west,south,east,north
-    const bbox = req.query.bbox ? req.query.bbox.split(',').map(Number) : null;
     const hours = req.query.hours ? parseInt(req.query.hours, 10) : null;
-
-    let result = arr;
-
     if (hours && Number.isFinite(hours)) {
       const cutoff = Date.now() - hours * 3600 * 1000;
       result = result.filter(p => (p.created_at || p.captured_at || 0) >= cutoff);
     }
 
-    if (bbox && bbox.length === 4 && bbox.every(v => Number.isFinite(v))) {
-      const [west, south, east, north] = bbox;
-      result = result.filter(p =>
-        p.lon >= west && p.lon <= east &&
-        p.lat >= south && p.lat <= north
-      );
+    const bbox = req.query.bbox ? req.query.bbox.split(',').map(Number) : null; // west,south,east,north
+    if (bbox && bbox.length === 4 && bbox.every(Number.isFinite)) {
+      const [w, s, e, n] = bbox;
+      result = result.filter(p => p.lon >= w && p.lon <= e && p.lat >= s && p.lat <= n);
     }
 
     res.json({ points: result });
@@ -100,34 +75,31 @@ app.get('/map-points', (req, res) => {
   }
 });
 
-// アップロード
-// 受け取る form フィールド: lat, lon, captured_at, accuracy, video(file)
-app.post('/upload', upload.single('video'), (req, res) => {
+// アップロード（画像 or 動画、コメント付き）
+app.post('/upload', uploadAny, (req, res) => {
   try {
+    const file = (req.files && req.files[0]) || null;
+    if (!file) return res.status(400).json({ ok: false, error: 'file がありません' });
+
     const id = nanoid();
     const lat = parseFloat(req.body.lat ?? '0');
     const lon = parseFloat(req.body.lon ?? '0');
     const accuracy = parseFloat(req.body.accuracy ?? '0');
     const captured_at = req.body.captured_at ? Date.parse(req.body.captured_at) : Date.now();
+    const note = (req.body.note || '').toString().slice(0, 500); // コメント
 
-    if (!req.file) {
-      return res.status(400).json({ ok: false, error: 'video がありません' });
-    }
+    const ext = path.extname(file.originalname || file.filename) || '';
+    const finalPath = path.join(UPLOAD_DIR, `${id}${ext || ''}`);
+    fs.renameSync(file.path, finalPath);
 
-    // 拡張子を付け直して保存ファイル名を確定
-    const ext = path.extname(req.file.originalname || '') || path.extname(req.file.filename) || '.mov';
-    const finalPath = path.join(UPLOAD_DIR, `${id}${ext}`);
-    fs.renameSync(req.file.path, finalPath);
+    const mime = file.mimetype || '';
+    const kind = mime.startsWith('image/') ? 'image' : 'video';
 
-    // DB 追記
     const arr = readDB();
     arr.push({
-      id,
-      lat,
-      lon,
-      accuracy,
-      captured_at,
-      created_at: Date.now(),
+      id, lat, lon, accuracy, note,
+      captured_at, created_at: Date.now(),
+      kind, mime, size: file.size,
       file_path: finalPath
     });
     writeDB(arr);
@@ -139,7 +111,5 @@ app.post('/upload', upload.single('video'), (req, res) => {
   }
 });
 
-// 起動
-app.listen(PORT, () => {
-  console.log('Server running on', PORT);
-});
+app.listen(PORT, () => console.log('Server running on', PORT));
+
