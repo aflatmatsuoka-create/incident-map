@@ -1,4 +1,4 @@
-// server.js — ESM ("type":"module")
+// server.js
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { customAlphabet } from 'nanoid';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,11 +33,21 @@ const upload = multer({ storage });
 const uploadAny = upload.any();
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 
+// hash 計算
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const rs = fs.createReadStream(filePath);
+    rs.on('error', reject);
+    rs.on('data', chunk => hash.update(chunk));
+    rs.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
 // 画面
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/map.html', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'map.html')));
 
-// メディア配信
 app.get('/media/:id', (req, res) => {
   const arr = readDB();
   const item = arr.find(v => v.id === req.params.id);
@@ -44,23 +55,14 @@ app.get('/media/:id', (req, res) => {
   res.sendFile(item.file_path);
 });
 
-// ピン一覧（?hours と ?bbox=west,south,east,north で絞り込み）
 app.get('/map-points', (req, res) => {
   try {
     let result = readDB();
-
     const hours = req.query.hours ? parseInt(req.query.hours, 10) : null;
     if (hours && Number.isFinite(hours)) {
       const cutoff = Date.now() - hours * 3600 * 1000;
       result = result.filter(p => (p.created_at || p.captured_at || 0) >= cutoff);
     }
-
-    const bbox = req.query.bbox ? req.query.bbox.split(',').map(Number) : null;
-    if (bbox && bbox.length === 4 && bbox.every(Number.isFinite)) {
-      const [w, s, e, n] = bbox;
-      result = result.filter(p => p.lon >= w && p.lon <= e && p.lat >= s && p.lat <= n);
-    }
-
     res.json({ points: result });
   } catch (e) {
     console.error('map-points error', e);
@@ -68,11 +70,22 @@ app.get('/map-points', (req, res) => {
   }
 });
 
-// アップロード（画像/動画 + コメント + カテゴリ）
-app.post('/upload', uploadAny, (req, res) => {
+// アップロード
+app.post('/upload', uploadAny, async (req, res) => {
   try {
     const file = (req.files && req.files[0]) || null;
     if (!file) return res.status(400).json({ ok: false, error: 'file がありません' });
+
+    const hash = await sha256File(file.path);
+    const arr = readDB();
+
+    // ★ すでに同じ hash があれば重複とみなす
+    const dup = arr.find(p => p.hash === hash);
+    if (dup) {
+      // 重複 → アップロードファイルを削除して既存のIDを返す
+      fs.unlinkSync(file.path);
+      return res.json({ ok: true, id: dup.id, duplicate: true });
+    }
 
     const id = nanoid();
     const lat = parseFloat(req.body.lat ?? '0');
@@ -80,28 +93,25 @@ app.post('/upload', uploadAny, (req, res) => {
     const accuracy = parseFloat(req.body.accuracy ?? '0');
     const captured_at = req.body.captured_at ? Date.parse(req.body.captured_at) : Date.now();
     const note = (req.body.note || '').toString().slice(0, 500);
-
-    // ★ カテゴリ拡張：incident / event / traffic / fire / disaster / police / other
-    const allowed = new Set(['incident','event','traffic','fire','disaster','police','other']);
-    const category = allowed.has((req.body.category || '').toString()) ? req.body.category : 'other';
+    const category = (req.body.category || 'other').toString();
 
     const ext = path.extname(file.originalname || file.filename) || '';
-    const finalPath = path.join(UPLOAD_DIR, `${id}${ext || ''}`);
+    const finalPath = path.join(UPLOAD_DIR, `${id}${ext}`);
     fs.renameSync(file.path, finalPath);
 
     const mime = file.mimetype || '';
     const kind = mime.startsWith('image/') ? 'image' : 'video';
 
-    const arr = readDB();
     arr.push({
       id, lat, lon, accuracy, note, category,
       captured_at, created_at: Date.now(),
       kind, mime, size: file.size,
-      file_path: finalPath
+      file_path: finalPath,
+      hash
     });
     writeDB(arr);
 
-    res.json({ ok: true, id });
+    res.json({ ok: true, id, duplicate: false });
   } catch (e) {
     console.error('upload error', e);
     res.status(500).json({ ok: false, error: 'upload 失敗' });
@@ -109,4 +119,5 @@ app.post('/upload', uploadAny, (req, res) => {
 });
 
 app.listen(PORT, () => console.log('Server running on', PORT));
+
 
