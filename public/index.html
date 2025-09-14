@@ -6,20 +6,23 @@
   <title>IncidentMap Web - Record (iPhone)</title>
 </head>
 <body style="font-family: -apple-system, system-ui, sans-serif; margin:16px;">
-  <h2>🎥 撮影してアップロード（iPhone）</h2>
-  <p>「カメラを開く」を押してから <b>写真/ビデオを撮る</b> を選んでください。<br>
-     アップ時は位置情報の<b>許可</b>が必要です。</p>
+  <h2>📤 撮影してアップロード（iPhone推奨）</h2>
+  <p>「メディアを選ぶ」で <b>写真またはビデオ</b> を選択してください。位置情報は<b>許可</b>してください。</p>
 
-  <!-- iPhone でカメラを直接開く -->
-  <input id="file" type="file" accept="video/*" capture="environment" style="display:none">
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-    <button id="pick" style="padding:10px 16px;">📸 カメラを開く</button>
+  <input id="file" type="file" accept="image/*,video/*" capture="environment" style="display:none" />
+
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+    <button id="pick" style="padding:10px 16px;">📁 メディアを選ぶ</button>
     <span id="status" style="color:#666"></span>
   </div>
+
+  <label>📝 コメント（任意）</label><br>
+  <textarea id="note" rows="3" style="width:100%;max-width:560px;"></textarea>
 
   <script>
     const statusEl = document.getElementById('status');
     const fileInput = document.getElementById('file');
+    const noteEl = document.getElementById('note');
     document.getElementById('pick').onclick = () => fileInput.click();
 
     fileInput.onchange = async () => {
@@ -37,13 +40,15 @@
       fd.append('lon', pos?.coords.longitude ?? 0);
       fd.append('captured_at', new Date().toISOString());
       fd.append('accuracy', Math.round(pos?.coords.accuracy ?? 0));
-      fd.append('video', file, file.name || 'video.mov');
+      fd.append('note', noteEl.value || '');
+      // フィールド名は何でもOK（サーバ側は any で受領）
+      fd.append('file', file, file.name || 'media');
 
       const r = await fetch('/upload', { method: 'POST', body: fd });
       const t = await r.json().catch(() => ({}));
       statusEl.textContent = t.ok ? 'アップロード完了！' : ('失敗: ' + (t.error || '不明'));
       if (t.ok) {
-        alert('アップロード完了！地図で確認できます。');
+        alert('アップロード完了！地図に反映されます。');
         location.href = '/map.html';
       } else {
         alert('アップロード失敗: ' + (t.error || '不明'));
@@ -51,9 +56,8 @@
     };
   </script>
 
-  <p style="margin-top:16px;">
-    <a href="/map.html">🗺 地図を見る</a>
-  </p>
+  <p style="margin-top:16px;"><a href="/map.html">🗺 地図を見る</a></p>
 </body>
 </html>
+
 
