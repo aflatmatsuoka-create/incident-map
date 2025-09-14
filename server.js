@@ -1,4 +1,4 @@
-// server.js
+// server.js — ESM ("type":"module")
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -32,9 +32,11 @@ const upload = multer({ storage });
 const uploadAny = upload.any();
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 
+// 画面
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/map.html', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'map.html')));
 
+// メディア配信
 app.get('/media/:id', (req, res) => {
   const arr = readDB();
   const item = arr.find(v => v.id === req.params.id);
@@ -42,19 +44,23 @@ app.get('/media/:id', (req, res) => {
   res.sendFile(item.file_path);
 });
 
+// ピン一覧（?hours と ?bbox=west,south,east,north で絞り込み）
 app.get('/map-points', (req, res) => {
   try {
     let result = readDB();
+
     const hours = req.query.hours ? parseInt(req.query.hours, 10) : null;
     if (hours && Number.isFinite(hours)) {
       const cutoff = Date.now() - hours * 3600 * 1000;
       result = result.filter(p => (p.created_at || p.captured_at || 0) >= cutoff);
     }
+
     const bbox = req.query.bbox ? req.query.bbox.split(',').map(Number) : null;
     if (bbox && bbox.length === 4 && bbox.every(Number.isFinite)) {
       const [w, s, e, n] = bbox;
       result = result.filter(p => p.lon >= w && p.lon <= e && p.lat >= s && p.lat <= n);
     }
+
     res.json({ points: result });
   } catch (e) {
     console.error('map-points error', e);
@@ -62,6 +68,7 @@ app.get('/map-points', (req, res) => {
   }
 });
 
+// アップロード（画像/動画 + コメント + カテゴリ）
 app.post('/upload', uploadAny, (req, res) => {
   try {
     const file = (req.files && req.files[0]) || null;
@@ -74,8 +81,8 @@ app.post('/upload', uploadAny, (req, res) => {
     const captured_at = req.body.captured_at ? Date.parse(req.body.captured_at) : Date.now();
     const note = (req.body.note || '').toString().slice(0, 500);
 
-    // ★カテゴリ（未指定は "other"）
-    const allowed = new Set(['incident', 'event', 'other']);
+    // ★ カテゴリ拡張：incident / event / traffic / fire / disaster / police / other
+    const allowed = new Set(['incident','event','traffic','fire','disaster','police','other']);
     const category = allowed.has((req.body.category || '').toString()) ? req.body.category : 'other';
 
     const ext = path.extname(file.originalname || file.filename) || '';
@@ -102,3 +109,4 @@ app.post('/upload', uploadAny, (req, res) => {
 });
 
 app.listen(PORT, () => console.log('Server running on', PORT));
+
